@@ -1,4 +1,4 @@
-# pretty
+# pretty [![GoDoc](https://godoc.org/github.com/zc310/pretty?status.svg)](http://godoc.org/github.com/zc310/pretty) [![Go Report](https://goreportcard.com/badge/github.com/zc310/pretty)](https://goreportcard.com/report/github.com/zc310/pretty)
 
 ## Installing
 
