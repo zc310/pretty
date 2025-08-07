@@ -1,14 +1,25 @@
-# pretty [![GoDoc](https://godoc.org/github.com/zc310/pretty?status.svg)](http://godoc.org/github.com/zc310/pretty) [![Go Report](https://goreportcard.com/badge/github.com/zc310/pretty)](https://goreportcard.com/report/github.com/zc310/pretty)
+# Pretty JSON Formatter [![GoDoc](https://godoc.org/github.com/zc310/pretty?status.svg)](http://godoc.org/github.com/zc310/pretty) [![Go Report](https://goreportcard.com/badge/github.com/zc310/pretty)](https://goreportcard.com/report/github.com/zc310/pretty)
 
+## Overview
+
+Pretty is a high-performance Go package for formatting JSON with flexible pretty-printing capabilities, featuring customizable indentation and depth control.
+
+## Key Features
+
+- 🚀 **High Performance** - Optimized with `fastjson` and `bytebufferpool` for minimal memory allocation
+- 🎨 **Flexible Formatting** - Configurable indentation styles and depth control
+- ⚙️ **Multiple Input Types** - Supports `[]byte`, `string`, `*fastjson.Value`, and any JSON-serializable Go value
+- 📏 **Depth Control** - Configurable max/min expansion depth
+- 🔄 **Dual Output Modes** - Pretty-printed (Format) and compact (Ugly) output
 ## Installing
 
 ```sh
-$ go get -u github.com/zc310/pretty
+go get -u github.com/zc310/pretty
 ```
 
-## Pretty
+## Usage Examples
 
-Using this example:
+### Basic Usage
 
 ```json
 {
@@ -61,3 +72,69 @@ Will format the json to:
   "spouse":null
 }
 ```
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/zc310/pretty"
+)
+
+func main() {
+	jsonStr := `{"name":"John","age":30,"address":{"city":"New York","zip":"10001"}}`
+	
+	// Default formatting
+	fmt.Println(string(pretty.Format(jsonStr)))
+	
+	// Compact output
+	fmt.Println(string(pretty.Ugly(jsonStr)))
+	
+	// Custom options
+	opts := &pretty.Options{
+		Indent:   "    ",  // 4-space indent
+		MaxDepth: 2,      // Max expansion depth
+	}
+	fmt.Println(string(pretty.FormatOptions(jsonStr, opts)))
+}
+```
+
+### Advanced Usage
+
+```go
+// Format directly from Go values
+data := map[string]interface{}{
+	"name": "Alice",
+	"skills": []string{"Go", "JavaScript", "Python"},
+}
+fmt.Println(string(pretty.Format(data)))
+
+// Handle fastjson.Value
+val, _ := fastjson.Parse(`{"key":"value"}`)
+fmt.Println(string(pretty.Format(val)))
+```
+
+## API Reference
+
+### `Options` Struct
+
+```go
+type Options struct {
+	Indent   string // Indentation string (default: two spaces)
+	MaxDepth int    // Maximum expansion depth (0 = unlimited)
+	MinDepth int    // Minimum expansion depth (0 = unlimited)
+}
+```
+
+### Core Functions
+
+- `Format(o any) []byte` - Format with default options
+- `Ugly(o any) []byte` - Compact output (no formatting)
+- `FormatOptions(o any, opts *Options) []byte` - Format with custom options
+
+## Performance Optimization
+
+1. **Buffer Pool Management** - Uses `bytebufferpool` to reduce memory allocations
+2. **Zero-Copy Processing** - Directly operates on raw JSON bytes
+3. **Optimized Depth Calculation** - Efficient nested depth computation
+4. **Minimal String Operations** - Avoids unnecessary string conversions and concatenations
