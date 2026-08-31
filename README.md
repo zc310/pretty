@@ -1,4 +1,4 @@
-# Pretty JSON Formatter [![GoDoc](https://godoc.org/github.com/zc310/pretty?status.svg)](http://godoc.org/github.com/zc310/pretty) [![Go Report](https://goreportcard.com/badge/github.com/zc310/pretty)](https://goreportcard.com/report/github.com/zc310/pretty)
+# Pretty JSON Formatter [![GoDoc](https://godoc.org/github.com/zc310/pretty?status.svg)](http://godoc.org/github.com/zc310/pretty)
 
 ## Overview
 
@@ -10,6 +10,7 @@ Pretty is a high-performance Go package for formatting JSON with flexible pretty
 - 🎨 **Flexible Formatting** - Configurable indentation styles and depth control
 - ⚙️ **Multiple Input Types** - Supports `[]byte`, `string`, `*fastjson.Value`, and any JSON-serializable Go value
 - 📏 **Depth Control** - Configurable max/min expansion depth
+- 🔤 **Key Sorting** - Optionally sort object keys lexicographically
 - 🔄 **Dual Output Modes** - Pretty-printed (Format) and compact (Ugly) output
 ## Installing
 
@@ -94,6 +95,7 @@ func main() {
 	opts := &pretty.Options{
 		Indent:   "    ",  // 4-space indent
 		MaxDepth: 2,      // Max expansion depth
+		SortKeys: true,   // Sort object keys lexicographically
 	}
 	fmt.Println(string(pretty.FormatOptions(jsonStr, opts)))
 }
@@ -114,6 +116,29 @@ val, _ := fastjson.Parse(`{"key":"value"}`)
 fmt.Println(string(pretty.Format(val)))
 ```
 
+## Command Line Tool
+
+The `cmd/pretty` CLI reads JSON from stdin (or a file) and writes formatted output:
+
+```sh
+# Format JSON from stdin
+echo '{"name":"John","age":30}' | pretty
+
+# Compact JSON (ugly mode)
+pretty -ugly -input data.json
+
+# Custom indentation
+echo '{"user":{"name":"John"}}' | pretty -indent "    "
+
+# Limit expansion depth
+echo '{"a":{"b":{"c":"d"}}}' | pretty -max-depth 2
+
+# Sort object keys
+echo '{"banana":1,"apple":2}' | pretty -sort-keys
+```
+
+CLI options: `-indent`, `-max-depth`, `-min-depth`, `-sort-keys`, `-ugly`, `-input`, `-output`, `-help`
+
 ## API Reference
 
 ### `Options` Struct
@@ -123,6 +148,7 @@ type Options struct {
 	Indent   string // Indentation string (default: two spaces)
 	MaxDepth int    // Maximum expansion depth (0 = unlimited)
 	MinDepth int    // Minimum expansion depth (0 = unlimited)
+	SortKeys bool   // Sort object keys lexicographically
 }
 ```
 

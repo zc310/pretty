@@ -1,8 +1,10 @@
 package pretty
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -10,16 +12,23 @@ import (
 	"github.com/valyala/fastjson"
 )
 
+// Options represents formatting options for JSON
 type Options struct {
-	Indent   string
-	MaxDepth int
-	MinDepth int
+	Indent   string // Indentation string, defaults to two spaces
+	MaxDepth int    // Maximum depth to expand, 0 means unlimited
+	MinDepth int    // Minimum depth to expand, 0 means no minimum restriction
+	SortKeys bool   // Sort object keys lexicographically
 }
 
 var DefaultOptions = &Options{Indent: "  ", MaxDepth: 1, MinDepth: 1}
 
+// Format formats any value with default options
 func Format(o any) []byte { return FormatOptions(o, nil) }
-func Ugly(o any) []byte   { return FormatOptions(o, &Options{MaxDepth: 0, MinDepth: 0}) }
+
+// Ugly returns compact JSON without indentation
+func Ugly(o any) []byte { return FormatOptions(o, &Options{MaxDepth: 0, MinDepth: 0}) }
+
+// FormatOptions formats any value with custom options
 func FormatOptions(o any, opts *Options) []byte {
 	switch v := o.(type) {
 	case *fastjson.Value:
@@ -60,8 +69,10 @@ func formatValue(o *fastjson.Value, opts *Options, depth int) []byte {
 	if opts.MaxDepth == 0 && opts.MinDepth == 0 {
 		return o.MarshalTo(nil)
 	}
-
-	if opts.MaxDepth != 0 && (depth >= opts.MaxDepth) || (opts.MinDepth != 0 && (getDepth(o, 0)) <= opts.MinDepth) {
+	if opts.MinDepth != 0 && getDepth(o, 0) <= opts.MinDepth {
+		return o.MarshalTo(nil)
+	}
+	if opts.MaxDepth != 0 && depth >= opts.MaxDepth {
 		return o.MarshalTo(nil)
 	}
 	buf := bytebufferpool.Get()
@@ -82,20 +93,32 @@ func formatValue(o *fastjson.Value, opts *Options, depth int) []byte {
 }
 func formatObject(v *fastjson.Value, buf *bytebufferpool.ByteBuffer, opts *Options, depth int) {
 	obj, _ := v.Object()
-	first := true
+
+	type kv struct {
+		key []byte
+		val *fastjson.Value
+	}
+	pairs := make([]kv, 0, obj.Len())
+	obj.Visit(func(key []byte, val *fastjson.Value) {
+		pairs = append(pairs, kv{key, val})
+	})
+	if opts.SortKeys {
+		sort.Slice(pairs, func(i, j int) bool {
+			return bytes.Compare(pairs[i].key, pairs[j].key) < 0
+		})
+	}
 
 	buf.WriteString("{\n")
-	obj.Visit(func(key []byte, val *fastjson.Value) {
-		if !first {
+	for i := range pairs {
+		if i > 0 {
 			buf.WriteString(",\n")
 		}
 		appendIndent(buf, opts, depth+1)
 		buf.WriteByte('"')
-		buf.Write(key)
+		buf.Write(pairs[i].key)
 		buf.WriteString(`":`)
-		buf.Write(formatValue(val, opts, depth+1))
-		first = false
-	})
+		buf.Write(formatValue(pairs[i].val, opts, depth+1))
+	}
 	buf.WriteString("\n")
 	appendIndent(buf, opts, depth)
 	buf.WriteByte('}')
@@ -123,6 +146,8 @@ func appendIndent(w io.Writer, opts *Options, depth int) {
 		io.WriteString(w, strings.Repeat(opts.Indent, depth))
 	}
 }
+
+// getDepth calculates the maximum nesting depth of a JSON value
 func getDepth(o *fastjson.Value, depth int) int {
 	if o == nil {
 		return depth
@@ -131,22 +156,30 @@ func getDepth(o *fastjson.Value, depth int) int {
 	switch o.Type() {
 	case fastjson.TypeObject:
 		obj, _ := o.Object()
-		maxDepth := 0
+		maxDepth := depth
+		hasChildren := false
 		obj.Visit(func(_ []byte, v *fastjson.Value) {
-			if d := getDepth(v, depth); d > maxDepth {
+			hasChildren = true
+			if d := getDepth(v, depth+1); d > maxDepth {
 				maxDepth = d
 			}
 		})
-		return maxDepth + 1
+		if !hasChildren {
+			return depth
+		}
+		return maxDepth
 	case fastjson.TypeArray:
 		arr, _ := o.Array()
-		maxDepth := 0
+		if len(arr) == 0 {
+			return depth
+		}
+		maxDepth := depth
 		for _, v := range arr {
-			if d := getDepth(v, depth); d > maxDepth {
+			if d := getDepth(v, depth+1); d > maxDepth {
 				maxDepth = d
 			}
 		}
-		return maxDepth + 1
+		return maxDepth
 	default:
 		return depth
 	}
