@@ -1,3 +1,6 @@
+# 编辑器目录
+.idea/
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
@@ -13,3 +16,7 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+
+# 浏览器示例的构建产物，由 make build-wasm 生成
+cmd/pretty-wasm/web/pretty.wasm
+cmd/pretty-wasm/web/wasm_exec.js
