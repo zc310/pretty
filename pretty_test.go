@@ -3,6 +3,8 @@ package pretty
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/valyala/fastjson"
@@ -311,6 +313,63 @@ func TestGetDepth(t *testing.T) {
 				t.Errorf("getDepth() = %d, want %d", got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestFormatOptionsE_ParseError(t *testing.T) {
+	input := `{invalid}`
+
+	result, err := FormatOptionsE(input, nil)
+	if err == nil {
+		t.Fatalf("FormatOptionsE(%q) error = nil, want a parse error", input)
+	}
+	if result != nil {
+		t.Errorf("FormatOptionsE() result = %q, want nil on error", result)
+	}
+
+	var parseErr *ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("FormatOptionsE() error = %T, want *ParseError", err)
+	}
+	if string(parseErr.Input) != input {
+		t.Errorf("ParseError.Input = %q, want %q", parseErr.Input, input)
+	}
+
+	legacy := FormatOptions(input, nil)
+	want := "parse error: " + parseErr.Err.Error() + "\njson: " + input
+	if string(legacy) != want {
+		t.Errorf("FormatOptions() = %q, want %q", legacy, want)
+	}
+}
+
+func TestFormatOptionsE_EncodeError(t *testing.T) {
+	input := map[string]any{"fn": func() {}}
+
+	if _, err := FormatOptionsE(input, nil); !errors.As(err, new(*EncodeError)) {
+		t.Errorf("FormatOptionsE() error = %v, want an *EncodeError", err)
+	}
+	if got := FormatOptions(input, nil); !strings.HasPrefix(string(got), "encode error: ") {
+		t.Errorf("FormatOptions() = %q, want an \"encode error: \" prefix", got)
+	}
+}
+
+func TestErrorAPIsMatchByteOutput(t *testing.T) {
+	input := `{"user":{"name":"John","tags":["a","b"]}}`
+
+	prettyOut, prettyErr := FormatE(input)
+	if prettyErr != nil {
+		t.Fatalf("FormatE() error = %v", prettyErr)
+	}
+	if !bytes.Equal(prettyOut, Format(input)) {
+		t.Errorf("FormatE() = %q, want %q", prettyOut, Format(input))
+	}
+
+	uglyOut, uglyErr := UglyE(input)
+	if uglyErr != nil {
+		t.Fatalf("UglyE() error = %v", uglyErr)
+	}
+	if !bytes.Equal(uglyOut, Ugly(input)) {
+		t.Errorf("UglyE() = %q, want %q", uglyOut, Ugly(input))
 	}
 }
 

@@ -2,12 +2,12 @@ package pretty
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
 
-	"github.com/goccy/go-json"
 	"github.com/valyala/bytebufferpool"
 	"github.com/valyala/fastjson"
 )
@@ -30,34 +30,84 @@ func Ugly(o any) []byte { return FormatOptions(o, &Options{MaxDepth: 0, MinDepth
 
 // FormatOptions formats any value with custom options
 func FormatOptions(o any, opts *Options) []byte {
+	result, err := FormatOptionsE(o, opts)
+	if err != nil {
+		return []byte(legacyError(err))
+	}
+	return result
+}
+
+// FormatE formats any value with default options and reports failures as errors
+func FormatE(o any) ([]byte, error) { return FormatOptionsE(o, nil) }
+
+// UglyE returns compact JSON without indentation and reports failures as errors
+func UglyE(o any) ([]byte, error) { return FormatOptionsE(o, &Options{MaxDepth: 0, MinDepth: 0}) }
+
+// FormatOptionsE formats any value with custom options and reports failures as
+// errors. Malformed JSON yields a *ParseError, values that cannot be serialized
+// yield an *EncodeError.
+func FormatOptionsE(o any, opts *Options) ([]byte, error) {
 	switch v := o.(type) {
 	case *fastjson.Value:
-		return formatValue(v, opts, 0)
+		return formatValue(v, opts, 0), nil
 	case []byte:
 		return formatByte(v, opts)
 	case string:
 		return formatByte([]byte(v), opts)
 	default:
-		b := bytebufferpool.Get()
-		defer bytebufferpool.Put(b)
-		if err := json.NewEncoder(b).Encode(v); err != nil {
-			return []byte(fmt.Sprintf("encode error: %v", err))
+		encoded, err := encodeValue(v)
+		if err != nil {
+			return nil, &EncodeError{Err: err}
 		}
-		return formatByte(b.B, opts)
+		return formatByte(encoded, opts)
 	}
+}
+
+// ParseError reports JSON that could not be parsed, together with the input that
+// failed.
+type ParseError struct {
+	Err   error
+	Input []byte
+}
+
+func (e *ParseError) Error() string { return "parse error: " + e.Err.Error() }
+
+func (e *ParseError) Unwrap() error { return e.Err }
+
+// EncodeError reports a Go value that could not be serialized to JSON.
+type EncodeError struct {
+	Err error
+}
+
+func (e *EncodeError) Error() string { return "encode error: " + e.Err.Error() }
+
+func (e *EncodeError) Unwrap() error { return e.Err }
+
+// legacyError renders an error the way FormatOptions has always reported it, so
+// callers that expect the message inside the returned bytes keep working.
+func legacyError(err error) string {
+	var parseErr *ParseError
+	if errors.As(err, &parseErr) {
+		return fmt.Sprintf("parse error: %v\njson: %s", parseErr.Err, parseErr.Input)
+	}
+	var encodeErr *EncodeError
+	if errors.As(err, &encodeErr) {
+		return fmt.Sprintf("encode error: %v", encodeErr.Err)
+	}
+	return err.Error()
 }
 
 var pp fastjson.ParserPool
 
-func formatByte(json []byte, opts *Options) []byte {
+func formatByte(json []byte, opts *Options) ([]byte, error) {
 	p := pp.Get()
 	defer pp.Put(p)
 
 	v, err := p.ParseBytes(json)
 	if err != nil {
-		return []byte(fmt.Sprintf("parse error: %v\njson: %s", err, string(json)))
+		return nil, &ParseError{Err: err, Input: json}
 	}
-	return formatValue(v, opts, 0)
+	return formatValue(v, opts, 0), nil
 }
 func formatValue(o *fastjson.Value, opts *Options, depth int) []byte {
 	if opts == nil {
