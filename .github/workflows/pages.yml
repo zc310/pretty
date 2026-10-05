@@ -1,0 +1,124 @@
+# 构建 WASM 格式化页面并发布到 GitHub Pages。
+#
+# 页面发布在站点根目录，访问地址：
+#   https://zc310.github.io/pretty/
+#
+# 页面里所有资源都是相对路径（<script src="wasm_exec.js">、fetch('pretty.wasm')），
+# 所以整体搬到子目录下不用改任何代码。要改成发布到子目录，把下面 Stage site 里的
+# 目标路径从 _site/ 换成 _site/tools/pretty/ 即可。
+name: Pages
+
+on:
+  push:
+    branches: ["main"]
+    # 只在这些路径变化时重建。pretty.wasm 有几兆，文档和 CI 相关的提交没必要
+    # 重新部署。
+    #
+    # 下面是 pretty.wasm 的依赖闭包，可用下面这条命令核对（务必用 wasm 目标）：
+    #
+    #   GOOS=js GOARCH=wasm go list -deps ./cmd/pretty-wasm \
+    #     | grep '^github.com/zc310/pretty' | sed 's|github.com/zc310/pretty/\?||'
+    #
+    # 闭包目前只有根包（encode_wasm.go、pretty.go）和 cmd/pretty-wasm，"*.go"
+    # 覆盖两者。新增依赖包后这里不必改，"*.go" 已经全包覆盖；只有当格式化核心
+    # 拆进子包时才需要把对应目录补进来，否则漏掉的包改动不会触发部署。
+    paths:
+      - "*.go"
+      - "cmd/pretty-wasm/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - ".github/workflows/pages.yml"
+  # 手动触发用于验证 Pages 配置，不受 paths 限制。
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一分支只保留最新一次部署：排队中的旧构建直接取消。
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          # 与 ofd 仓库的 Pages 工作流保持一致。用 go.mod 里写的最低版本也能构建，
+          # 但新版本生成的 wasm_exec.js 更小。
+          go-version: "1.27"
+          cache: true
+
+      # 用官方 release 的预编译 binaryen，不用 apt 的：noble 源里只有 108。
+      # Makefile 的 WASM_OPT_FLAGS 只有 -Oz，108 也认这个选项，但版本太旧对
+      # Go 1.27 生成的 wasm 结构优化有限。下载后校验 sha256，避免拿到损坏包。
+      - name: Install binaryen
+        run: |
+          BINARYEN_VERSION=133
+          BASE="https://github.com/WebAssembly/binaryen/releases/download/version_${BINARYEN_VERSION}"
+          FILE="binaryen-version_${BINARYEN_VERSION}-x86_64-linux.tar.gz"
+          curl -sSL --fail --max-time 600 -o "/tmp/$FILE" "$BASE/$FILE"
+          curl -sSL --fail --max-time 60 -o "/tmp/$FILE.sha256" "$BASE/$FILE.sha256"
+          (cd /tmp && sha256sum -c "$FILE.sha256")
+          tar -xzf "/tmp/$FILE" -C /tmp
+          sudo install -m755 "/tmp/binaryen-version_${BINARYEN_VERSION}/bin/wasm-opt" /usr/local/bin/wasm-opt
+          # 选项与 Makefile 的 WASM_OPT_FLAGS 对齐，版本不够会在这一步暴露，
+          # 而不是等到 make build-wasm 才失败。
+          wasm-opt -Oz --version
+
+      # build-wasm 负责三件事：编译 pretty.wasm、用 wasm_opt -Oz 压缩、从 GOROOT
+      # 复制 wasm_exec.js。三者都写进 cmd/pretty-wasm/web/，无需额外搬运。
+      - name: Build WASM
+        run: make build-wasm
+
+      # 语言包和 DOM 接线的静态检查。i18n.js 漏翻、占位符不一致、app.js 引用了
+      # 不存在的元素 id 都在这一步挡住，不会带着坏页面部署。
+      - name: Test web scripts
+        run: make test-wasm-web
+
+      - name: Test
+        run: go test ./...
+
+      # 上传前确认 wasm_exec.js 真的存在且不是空文件：页面在浏览器里如果拿不到
+      # 它只会显示"WASM 加载失败"，从构建日志上看不出来。
+      - name: Verify build artifacts
+        run: |
+          set -e
+          test -s cmd/pretty-wasm/web/pretty.wasm
+          test -s cmd/pretty-wasm/web/wasm_exec.js
+          grep -q "globalThis.Go" cmd/pretty-wasm/web/wasm_exec.js
+          du -h cmd/pretty-wasm/web/pretty.wasm
+
+      # upload-pages-artifact 不支持排除项，先把要发布的文件挑到 _site。
+      # 剔掉 test/：那是本地跑 make test-wasm-web 用的检查脚本，页面上没有入口。
+      - name: Stage site
+        run: |
+          mkdir -p _site
+          cp -a cmd/pretty-wasm/web/. _site/
+          rm -rf _site/test
+          echo "发布内容："
+          find _site -type f | sort
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
