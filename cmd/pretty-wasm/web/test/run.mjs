@@ -78,6 +78,8 @@ for (const match of app.matchAll(/setStatus\(ok \? '([\w.]+)' : '([\w.]+)'/g)) {
 for (const key of ['badge.loading', 'badge.ready', 'badge.failed']) used.add(key);
 // langName 是语言按钮上显示的目标语言名，不走 t()，由 applyLang 直接取。
 for (const key of ['langName']) used.add(key);
+// applyTheme 用三元表达式在两个主题提示之间选，两边都要算用过。
+for (const key of ['tip.themeLight', 'tip.themeDark']) used.add(key);
 
 for (const key of [...used].sort()) {
   const missing = langs.filter(lang => typeof lookup(tables[lang], key) !== 'string');

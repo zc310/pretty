@@ -5,17 +5,51 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pretty JSON · WebAssembly</title>
 <style>
+  /* 所有颜色都走变量，暗色是 :root 的默认值，亮色在下面按 [data-theme] 覆盖。
+     组件样式里不要写死颜色，否则换主题时漏改。 */
   :root {
     --bg: #0f1117;
     --panel: #151926;
     --border: #262c3b;
+    --border-strong: #38405a;
     --text: #d8dcea;
+    --text-soft: #cbd3e6;
     --muted: #8b93a7;
+    --placeholder: #7a8394;
     --accent: #4c8dff;
     --accent-soft: rgba(76, 141, 255, 0.14);
+    --accent-border: rgba(76, 141, 255, 0.5);
+    --accent-text: #cfe0ff;
     --error: #ff6b6b;
+    --error-border: rgba(255, 107, 107, 0.45);
     --ok: #4cc38a;
+    --ok-border: rgba(76, 195, 138, 0.45);
+    --control: #1b2030;
+    --control-hover: #212739;
     --left-width: 50%;
+  }
+
+  /* 亮色主题。app.js 会在首次访问时按 prefers-color-scheme 决定是否加上这个属性，
+     用户手动切换后记在 localStorage。 */
+  [data-theme="light"] {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --border: #dcdfe6;
+    --border-strong: #c2c7d2;
+    --text: #1f2430;
+    --text-soft: #2b3140;
+    --muted: #626b7d;
+    --placeholder: #6b7280;
+    --accent: #1a63d8;
+    --accent-soft: rgba(26, 99, 216, 0.09);
+    --accent-border: rgba(26, 99, 216, 0.4);
+    --accent-text: #14448f;
+    --error: #c62828;
+    --error-border: rgba(198, 40, 40, 0.4);
+    --ok: #1b7a4b;
+    --ok-border: rgba(27, 122, 75, 0.4);
+    --control: #ffffff;
+    --control-hover: #eef1f6;
   }
 
   * { box-sizing: border-box; }
@@ -64,9 +98,9 @@
     white-space: nowrap;
   }
 
-  .badge.ready { color: var(--ok); border-color: rgba(76, 195, 138, 0.45); }
+  .badge.ready { color: var(--ok); border-color: var(--ok-border); }
   .badge.loading { color: var(--muted); }
-  .badge.failed { color: var(--error); border-color: rgba(255, 107, 107, 0.45); }
+  .badge.failed { color: var(--error); border-color: var(--error-border); }
 
   .toolbar {
     display: flex;
@@ -84,21 +118,21 @@
     padding: 6px 12px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: #1b2030;
+    background: var(--control);
     color: var(--text);
     font: inherit;
     font-size: 13px;
     cursor: pointer;
   }
 
-  .btn:hover:not(:disabled) { border-color: #38405a; background: #212739; }
+  .btn:hover:not(:disabled) { border-color: var(--border-strong); background: var(--control-hover); }
   .btn:active:not(:disabled) { transform: translateY(1px); }
   .btn:disabled { opacity: 0.45; cursor: default; }
 
   .btn.primary {
     background: var(--accent-soft);
-    border-color: rgba(76, 141, 255, 0.5);
-    color: #cfe0ff;
+    border-color: var(--accent-border);
+    color: var(--accent-text);
   }
 
   .btn svg {
@@ -111,13 +145,27 @@
     stroke-linejoin: round;
   }
 
-  .btn.lang {
+  .btn.lang,
+  .btn.theme {
     padding: 3px 10px;
     font-size: 12px;
     color: var(--muted);
   }
 
-  .btn.lang:hover { color: var(--text); }
+  .btn.lang:hover,
+  .btn.theme:hover { color: var(--text); }
+
+  /* 主题按钮只放一个图标，用 aria-label 和 title 说明会切到什么。 */
+  .btn.theme {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 8px;
+  }
+
+  /* 按钮上的图标表示"点一下会变成什么"：暗色显示太阳，亮色显示月亮。 */
+  .btn.theme .icon-moon { display: none; }
+  [data-theme="light"] .btn.theme .icon-sun { display: none; }
+  [data-theme="light"] .btn.theme .icon-moon { display: inline; }
 
   .sep {
     width: 1px;
@@ -140,7 +188,7 @@
     padding: 4px 6px;
     border: 1px solid var(--border);
     border-radius: 6px;
-    background: #1b2030;
+    background: var(--control);
     color: var(--text);
     font: inherit;
     font-size: 12px;
@@ -206,7 +254,7 @@
     cursor: pointer;
   }
 
-  .mini:hover:not(:disabled) { color: var(--text); border-color: #38405a; }
+  .mini:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
   .mini:disabled { opacity: 0.4; cursor: default; }
 
   textarea {
@@ -225,8 +273,8 @@
     tab-size: 2;
   }
 
-  textarea::placeholder { color: #5a6379; }
-  textarea:read-only { color: #cbd3e6; }
+  textarea::placeholder { color: var(--placeholder); }
+  textarea:read-only { color: var(--text-soft); }
   textarea.error { color: var(--error); }
 
   .splitter {
@@ -259,6 +307,15 @@
 <header class="topbar">
   <h1>Pretty JSON</h1>
   <p class="subtitle" data-i18n="subtitle"></p>
+  <button id="btn-theme" class="btn theme" type="button">
+    <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="4.2"/>
+      <path d="M12 2.5v2.2M12 19.3v2.2M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+    </svg>
+    <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/>
+    </svg>
+  </button>
   <button id="btn-lang" class="btn lang" type="button"></button>
   <span id="wasm-status" class="badge loading"></span>
 </header>

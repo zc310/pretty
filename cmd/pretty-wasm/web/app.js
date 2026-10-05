@@ -8,12 +8,14 @@ const SAMPLE = `{"id":7,"name":"John","email":"john@example.com","active":true,
 
 const DOWNLOAD_NAME = 'formatted.json';
 const LANG_KEY = 'pretty-lang';
+const THEME_KEY = 'pretty-theme';
 
 const I18N = window.PRETTY_I18N;
 
 const el = {
   status: document.getElementById('wasm-status'),
   lang: document.getElementById('btn-lang'),
+  theme: document.getElementById('btn-theme'),
   format: document.getElementById('btn-format'),
   ugly: document.getElementById('btn-ugly'),
   copy: document.getElementById('btn-copy'),
@@ -34,6 +36,7 @@ const el = {
 
 let wasmAPI = null;
 let lang = detectLang();
+let theme = detectTheme();
 let wasmBadge = 'loading';
 let status = null;
 
@@ -41,6 +44,33 @@ function detectLang() {
   const saved = localStorage.getItem(LANG_KEY);
   if (saved && I18N[saved]) return saved;
   return (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+
+// detectTheme 先看用户上次的选择，没有就跟随系统的 prefers-color-scheme。
+// index.html 里 data-theme="light" 的样式只在亮色时生效，暗色是默认值，
+// 所以这里只需要在亮色时设属性。
+function detectTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved === 'light' || saved === 'dark') return saved;
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+    ? 'light'
+    : 'dark';
+}
+
+function applyTheme() {
+  if (theme === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+  el.theme.title = t(theme === 'light' ? 'tip.themeDark' : 'tip.themeLight');
+  el.theme.setAttribute('aria-label', el.theme.title);
+}
+
+function toggleTheme() {
+  theme = theme === 'light' ? 'dark' : 'light';
+  localStorage.setItem(THEME_KEY, theme);
+  applyTheme();
 }
 
 // t 取文案并替换 {name} 占位符。语言包里没有的键原样返回，方便排查漏翻。
@@ -76,6 +106,8 @@ function applyLang() {
   el.lang.textContent = I18N[lang === 'zh' ? 'en' : 'zh'].langName;
   el.lang.title = t('lang.switch');
 
+  // 主题按钮的提示是译文，切换语言后要跟着重写。
+  applyTheme();
   setWasmStatus(wasmBadge);
   renderStatus();
   updateMetas();
@@ -293,6 +325,7 @@ async function loadWasm() {
 }
 
 function main() {
+  el.theme.addEventListener('click', toggleTheme);
   el.lang.addEventListener('click', toggleLang);
   el.format.addEventListener('click', () => run(false));
   el.ugly.addEventListener('click', () => run(true));

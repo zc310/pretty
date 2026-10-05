@@ -28,6 +28,8 @@ window.PRETTY_I18N = {
       clear: '清空两侧内容',
       sample: '填入示例 JSON 并格式化',
       toInput: '把输出放回左侧继续编辑',
+      themeLight: '切换到亮色主题',
+      themeDark: '切换到暗色主题',
     },
 
     label: {
@@ -93,6 +95,8 @@ window.PRETTY_I18N = {
       clear: 'Clear both panes',
       sample: 'Fill in sample JSON and format it',
       toInput: 'Move the output back to the input pane',
+      themeLight: 'Switch to light theme',
+      themeDark: 'Switch to dark theme',
     },
 
     label: {
