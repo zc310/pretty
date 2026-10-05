@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pretty JSON · WebAssembly</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #151926;
+    --border: #262c3b;
+    --text: #d8dcea;
+    --muted: #8b93a7;
+    --accent: #4c8dff;
+    --accent-soft: rgba(76, 141, 255, 0.14);
+    --error: #ff6b6b;
+    --ok: #4cc38a;
+    --left-width: 50%;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 14px 18px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .topbar h1 {
+    margin: 0;
+    font-size: 17px;
+    letter-spacing: 0.3px;
+  }
+
+  .topbar .subtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .badge {
+    margin-left: auto;
+    padding: 3px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .badge.ready { color: var(--ok); border-color: rgba(76, 195, 138, 0.45); }
+  .badge.loading { color: var(--muted); }
+  .badge.failed { color: var(--error); border-color: rgba(255, 107, 107, 0.45); }
+
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #1b2030;
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .btn:hover:not(:disabled) { border-color: #38405a; background: #212739; }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+
+  .btn.primary {
+    background: var(--accent-soft);
+    border-color: rgba(76, 141, 255, 0.5);
+    color: #cfe0ff;
+  }
+
+  .btn svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .btn.lang {
+    padding: 3px 10px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .btn.lang:hover { color: var(--text); }
+
+  .sep {
+    width: 1px;
+    height: 22px;
+    background: var(--border);
+  }
+
+  .spacer { flex: 1 1 auto; }
+
+  .field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .field select,
+  .field input {
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #1b2030;
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+  }
+
+  .field input[type="number"] { width: 72px; }
+
+  .check {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  .panes {
+    flex: 1 1 auto;
+    display: grid;
+    grid-template-columns: var(--left-width) 6px 1fr;
+    min-height: 0;
+  }
+
+  .pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    background: var(--panel);
+  }
+
+  .pane-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .pane-head h2 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  .pane-head .meta {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .mini {
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .mini:hover:not(:disabled) { color: var(--text); border-color: #38405a; }
+  .mini:disabled { opacity: 0.4; cursor: default; }
+
+  textarea {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0;
+    padding: 12px;
+    border: 0;
+    outline: none;
+    resize: none;
+    background: transparent;
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    tab-size: 2;
+  }
+
+  textarea::placeholder { color: #5a6379; }
+  textarea:read-only { color: #cbd3e6; }
+  textarea.error { color: var(--error); }
+
+  .splitter {
+    cursor: col-resize;
+    background: var(--border);
+  }
+
+  .splitter:hover, .splitter.dragging { background: var(--accent); }
+
+  .statusbar {
+    padding: 7px 18px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    min-height: 30px;
+  }
+
+  .statusbar.ok { color: var(--ok); }
+  .statusbar.error { color: var(--error); }
+
+
+  @media (max-width: 760px) {
+    .panes { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+    .splitter { display: none; }
+    .spacer { display: none; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <h1>Pretty JSON</h1>
+  <p class="subtitle" data-i18n="subtitle"></p>
+  <button id="btn-lang" class="btn lang" type="button"></button>
+  <span id="wasm-status" class="badge loading"></span>
+</header>
+
+<div class="toolbar">
+  <button id="btn-format" class="btn primary" data-i18n-title="tip.format" disabled>
+    <svg viewBox="0 0 24 24"><path d="M4 6h16M4 10h10M4 14h16M4 18h7"/></svg>
+    <span data-i18n="btn.format"></span>
+  </button>
+  <button id="btn-ugly" class="btn" data-i18n-title="tip.ugly" disabled>
+    <svg viewBox="0 0 24 24"><path d="M4 12h5M6.5 9.5L4 12l2.5 2.5M20 12h-5M17.5 9.5L20 12l-2.5 2.5"/></svg>
+    <span data-i18n="btn.ugly"></span>
+  </button>
+  <span class="sep"></span>
+  <button id="btn-copy" class="btn" data-i18n-title="tip.copy" disabled>
+    <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5H6a2 2 0 0 0-2 2v9"/></svg>
+    <span data-i18n="btn.copy"></span>
+  </button>
+  <button id="btn-download" class="btn" data-i18n-title="tip.download" disabled>
+    <svg viewBox="0 0 24 24"><path d="M12 4v10M8.5 10.5L12 14l3.5-3.5M5 19h14"/></svg>
+    <span data-i18n="btn.download"></span>
+  </button>
+  <button id="btn-clear" class="btn" data-i18n-title="tip.clear" disabled>
+    <svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M6.5 7l1 12h9l1-12M10.5 10v6M13.5 10v6"/></svg>
+    <span data-i18n="btn.clear"></span>
+  </button>
+  <span class="sep"></span>
+  <button id="btn-sample" class="btn" data-i18n-title="tip.sample">
+    <svg viewBox="0 0 24 24"><path d="M12 4l1.6 4.4L18 10l-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6z"/></svg>
+    <span data-i18n="btn.sample"></span>
+  </button>
+
+  <span class="spacer"></span>
+
+  <label class="field"><span data-i18n="label.indent"></span>
+    <select id="indent">
+      <option value="2" data-i18n="opt.spaces2"></option>
+      <option value="4" data-i18n="opt.spaces4"></option>
+      <option value="tab" data-i18n="opt.tab"></option>
+    </select>
+  </label>
+  <label class="field"><span data-i18n="label.depth"></span>
+    <input id="max-depth" type="number" min="0" step="1" data-i18n-placeholder="placeholderDepth">
+  </label>
+  <label class="check"><input id="sort-keys" type="checkbox"><span data-i18n="label.sortKeys"></span></label>
+</div>
+
+<main class="panes">
+  <section class="pane">
+    <div class="pane-head">
+      <h2 data-i18n="pane.input"></h2>
+      <span id="input-meta" class="meta"></span>
+    </div>
+    <textarea id="input" spellcheck="false" autocomplete="off" data-i18n-placeholder="placeholder.input"></textarea>
+  </section>
+
+  <div id="splitter" class="splitter" role="separator" aria-orientation="vertical"></div>
+
+  <section class="pane">
+    <div class="pane-head">
+      <h2 data-i18n="pane.output"></h2>
+      <span id="output-meta" class="meta"></span>
+      <button id="btn-to-input" class="mini" data-i18n="btn.toInput" data-i18n-title="tip.toInput" disabled></button>
+    </div>
+    <textarea id="output" readonly spellcheck="false" data-i18n-placeholder="placeholder.output"></textarea>
+  </section>
+</main>
+
+<footer id="status" class="statusbar"></footer>
+
+<script src="wasm_exec.js"></script>
+<script src="i18n.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
