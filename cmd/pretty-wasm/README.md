@@ -76,7 +76,11 @@ make test-wasm-web       # 检查语言包完整性和 DOM 接线，只需 node
 
 改动 `web/i18n.js`、`web/index.html` 或 `web/app.js` 后运行 `make test-wasm-web`：它会检查两种语言里每个 key 都存在、`{占位符}` 一致、语言包里没有没人用的 key，以及 `app.js` 引用的每个元素 id 都在 HTML 里。
 
-`wasm_exec.js` 每次都从当前 `GOROOT` 的 `lib/wasm` 拷贝，请保持它和编译用的 Go 版本一致。如果装了 `binaryen` 的 `wasm-opt`，`make build-wasm` 会自动用 `-Oz` 再压一遍；没有该命令时会打印警告并使用未优化的产物（当前约 2.6 MB）。
+`wasm_exec.js` 每次都从当前 `GOROOT` 的 `lib/wasm` 拷贝，请保持它和编译用的 Go 版本一致。
+
+`wasm-opt` 是可选的：装了（`binaryen` 提供的）就会用 `-Oz` 再压一遍，实测 2697294 字节压到 2542048 字节。没装、或者压缩失败，构建都会继续，只是产物是未优化版本，控制台会说明原因；压缩失败时会把 `wasm-opt` 自己的报错原样打出来，不会中断构建。
+
+`WASM_OPT_FLAGS` 里必须显式打开 Go 生成的 wasm 用到的特性（bulk memory、nontrapping-float-to-int、sign-ext、mutable-globals），否则 `wasm-opt` 会在输入校验阶段报上百行 `requires bulk memory` 然后退出。装的是老版本、不认这些选项时，构建同样会降级而不是失败，所以 CI 里单独校验了一遍选项能被接受，并用产物体积区分"压过了"和"压不动"。
 
 部署时把 `web` 目录整体上传到任意静态服务即可，注意给 `.wasm` 配 `application/wasm` 的 MIME 类型；`app.js` 在 MIME 不对时会自动退回 `WebAssembly.instantiate`，所以不影响使用。页面里所有资源都用相对路径，放在子目录下（例如 `https://example.com/tools/pretty/`）不需要改代码。
 
