@@ -56,9 +56,9 @@ jobs:
           go-version: "1.27"
           cache: true
 
-      # 用官方 release 的预编译 binaryen，不用 apt 的：noble 源里只有 108。
-      # Makefile 的 WASM_OPT_FLAGS 只有 -Oz，108 也认这个选项，但版本太旧对
-      # Go 1.27 生成的 wasm 结构优化有限。下载后校验 sha256，避免拿到损坏包。
+      # 用官方 release 的预编译 binaryen，不用 apt 的：noble 源里只有 108，
+      # 版本太旧，对 Go 1.27 生成的 wasm 结构优化有限。下载后校验 sha256，
+      # 避免拿到损坏包。
       - name: Install binaryen
         run: |
           BINARYEN_VERSION=133
@@ -69,9 +69,10 @@ jobs:
           (cd /tmp && sha256sum -c "$FILE.sha256")
           tar -xzf "/tmp/$FILE" -C /tmp
           sudo install -m755 "/tmp/binaryen-version_${BINARYEN_VERSION}/bin/wasm-opt" /usr/local/bin/wasm-opt
-          # 选项与 Makefile 的 WASM_OPT_FLAGS 对齐，版本不够会在这一步暴露，
-          # 而不是等到 make build-wasm 才失败。
-          wasm-opt -Oz --version
+          # 校验 WASM_OPT_FLAGS 里的选项这个版本都认：wasm-opt 遇到不认识的选项
+          # 会直接退出非零，而 make build-wasm 捕获失败后会降级成未优化产物继续，
+          # 只看最终产物体积不容易判断是"压过了"还是"压不动"。
+          wasm-opt $(make -s print-wasm-opt-flags) --version
 
       # build-wasm 负责三件事：编译 pretty.wasm、用 wasm_opt -Oz 压缩、从 GOROOT
       # 复制 wasm_exec.js。三者都写进 cmd/pretty-wasm/web/，无需额外搬运。
@@ -86,15 +87,23 @@ jobs:
       - name: Test
         run: go test ./...
 
-      # 上传前确认 wasm_exec.js 真的存在且不是空文件：页面在浏览器里如果拿不到
-      # 它只会显示"WASM 加载失败"，从构建日志上看不出来。
+      # 上传前确认产物真的可用：wasm_exec.js 缺失或为空时，页面在浏览器里只会显示
+      # "WASM 加载失败"，从构建日志上看不出来。体积上限用来兜住 wasm-opt 静默
+      # 降级——没压缩的产物约 2.6 MB，压缩后明显更小。
       - name: Verify build artifacts
         run: |
           set -e
           test -s cmd/pretty-wasm/web/pretty.wasm
           test -s cmd/pretty-wasm/web/wasm_exec.js
           grep -q "globalThis.Go" cmd/pretty-wasm/web/wasm_exec.js
-          du -h cmd/pretty-wasm/web/pretty.wasm
+          # 实测：未优化 2697294 字节，-Oz 压缩后 2542048 字节。阈值取中间值
+          # 2620000，两个体积分居两侧才能区分。不要取整到 MB。
+          size=$(stat -c %s cmd/pretty-wasm/web/pretty.wasm)
+          echo "pretty.wasm: $size bytes"
+          if [ "$size" -ge 2620000 ]; then
+            echo "::error::pretty.wasm 未压缩，检查 wasm-opt 是否生效"
+            exit 1
+          fi
 
       # upload-pages-artifact 不支持排除项，先把要发布的文件挑到 _site。
       # 剔掉 test/：那是本地跑 make test-wasm-web 用的检查脚本，页面上没有入口。
