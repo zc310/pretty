@@ -116,6 +116,26 @@ val, _ := fastjson.Parse(`{"key":"value"}`)
 fmt.Println(string(pretty.Format(val)))
 ```
 
+## WebAssembly
+
+The same formatter is available in the browser through `cmd/pretty-wasm`:
+
+```bash
+make build-wasm
+make serve   # opens http://localhost:8080
+```
+
+```js
+pretty.format('{"b":1,"a":{"c":2}}', { indent: '  ', sortKeys: true });
+// { ok: true, output: '{\n  "a":{\n    "c":2\n  },\n  "b":1\n}', error: '' }
+```
+
+The `web` directory is a ready-to-deploy page: paste JSON on the left, click a button, read the formatted result on the right. Its UI is available in English and Chinese. `make test-wasm-web` checks the translation tables and DOM wiring. See [`cmd/pretty-wasm/README.md`](cmd/pretty-wasm/README.md) for the JS API and build details.
+
+Online demo: <https://zc310.github.io/pretty/> — pushed to `main` is built and deployed automatically by [`.github/workflows/pages.yml`](.github/workflows/pages.yml).
+
+Note that the js/wasm build does not bundle `goccy/go-json`, so it accepts JSON text (`string`, `[]byte`) or `*fastjson.Value` only; serializing arbitrary Go values returns an error there.
+
 ## Command Line Tool
 
 The `cmd/pretty` CLI reads JSON from stdin (or a file) and writes formatted output:
@@ -157,6 +177,16 @@ type Options struct {
 - `Format(o any) []byte` - Format with default options
 - `Ugly(o any) []byte` - Compact output (no formatting)
 - `FormatOptions(o any, opts *Options) []byte` - Format with custom options
+
+### Error-returning variants
+
+`Format`, `Ugly` and `FormatOptions` never fail: they return the error message as the result bytes. These variants report failures as errors instead, which is what the WebAssembly build and the browser page use:
+
+- `FormatE(o any) ([]byte, error)` - Format with default options
+- `UglyE(o any) ([]byte, error)` - Compact output
+- `FormatOptionsE(o any, opts *Options) ([]byte, error)` - Format with custom options
+
+Malformed JSON yields a `*ParseError` (with the offending input attached), values that cannot be serialized yield an `*EncodeError`.
 
 ## Performance Optimization
 
