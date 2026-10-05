@@ -28,6 +28,7 @@ python3 -m http.server 8080 --directory cmd/pretty-wasm/web
 - 快捷键：`Ctrl`/`Cmd` + `Enter` 格式化，按住 `Alt` 改为压缩。
 - 选项：缩进（2 空格 / 4 空格 / Tab）、展开深度（留空表示不限）、对象键排序。改动选项后会重新格式化。
 - 界面支持中文和英文，标题栏按钮切换；首次打开按浏览器语言选择，选择结果记在 `localStorage`。
+- 亮色和暗色主题，标题栏按钮切换；首次打开跟随系统的 `prefers-color-scheme`，手动选过一次之后以用户的选择为准。两套主题的正文对比度都达到 WCAG AA。
 - WASM 加载完成后自动填入示例并格式化一次。
 
 ## JS API
