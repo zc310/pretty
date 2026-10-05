@@ -73,7 +73,7 @@ function applyLang() {
     node.placeholder = t(node.dataset.i18nPlaceholder);
   }
 
-  el.lang.textContent = I18N[lang === 'zh' ? 'en' : 'zh'].label;
+  el.lang.textContent = I18N[lang === 'zh' ? 'en' : 'zh'].langName;
   el.lang.title = t('lang.switch');
 
   setWasmStatus(wasmBadge);

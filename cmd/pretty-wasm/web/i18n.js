@@ -1,7 +1,7 @@
 /* 页面文案。语言按 localStorage 选择，首次访问按浏览器语言判断，可在标题栏切换。 */
 window.PRETTY_I18N = {
   zh: {
-    label: '中文',
+    langName: '中文',
     title: 'Pretty JSON · WebAssembly',
     subtitle: 'Go + WebAssembly，格式化全部在本地浏览器完成',
     badge: {
@@ -66,7 +66,7 @@ window.PRETTY_I18N = {
   },
 
   en: {
-    label: 'English',
+    langName: 'English',
     title: 'Pretty JSON · WebAssembly',
     subtitle: 'Go + WebAssembly, formatting runs entirely in your browser',
     badge: {

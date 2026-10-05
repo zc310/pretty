@@ -22,6 +22,49 @@ const langs = Object.keys(tables);
 const lookup = (table, key) => key.split('.').reduce((node, part) => (node == null ? node : node[part]), table);
 const placeholders = text => [...String(text).matchAll(/\{(\w+)\}/g)].map(m => m[1]).sort().join(',');
 
+// 同一个对象字面量里重复的 key，后一个会覆盖前一个，语言表里就只剩后一个，
+// 上面那些按路径取值的检查全都发现不了。语言按钮最初就踩了这个坑：
+// label 既是语言名又是选项标签组，重复定义后按钮显示成 [object Object]。
+// 这里扫一遍源码，把同一层里出现两次以上的 key 指出来。
+function duplicateKeys(source) {
+  const found = [];
+  // 逐 token 扫原文：注释和字符串整体跳过，避免字符串里的 '{"a":1}'、
+  // 模板里的 {name} 和 URL 里的 // 被误当成 key 或大括号。
+  // 维护大括号的进出栈，栈顶就是当前所在的对象：不能用全局深度计数，
+  // 两个平级的对象（zh 和 en）深度相同但不是同一个。
+  const stack = [{ keys: new Set() }];
+  const token =
+    /\/\/[^\n]*|\/\*[\s\S]*?\*\/|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`|[A-Za-z_$][\w$]*|[{}]/g;
+  let match;
+  while ((match = token.exec(source)) !== null) {
+    const text = match[0];
+    if (text === '{') {
+      stack.push({ keys: new Set() });
+      continue;
+    }
+    if (text === '}') {
+      if (stack.length > 1) stack.pop();
+      continue;
+    }
+    if (!/^[A-Za-z_$]/.test(text)) continue;
+    // 标识符后面紧跟冒号才是 key，否则只是值（例如 bare 数组里的字符串）。
+    const after = source.slice(token.lastIndex);
+    const isKey = /^\s*:/.test(after);
+    if (!isKey) continue;
+    const level = stack[stack.length - 1];
+    if (level.keys.has(text)) found.push(text);
+    level.keys.add(text);
+  }
+  return found;
+}
+
+const duplicates = duplicateKeys(i18nSource);
+check(
+  'i18n.js has no duplicate keys in one object literal',
+  duplicates.length === 0,
+  `重复定义：${[...new Set(duplicates)].join(', ')}（后一个会覆盖前一个）`,
+);
+
 // 页面里用到的 key：data-i18n 系列属性，加上 app.js 里 t() / setStatus() 的字面量。
 const used = new Set();
 for (const match of html.matchAll(/data-i18n(?:-title|-placeholder)?="([^"]+)"/g)) used.add(match[1]);
@@ -33,6 +76,8 @@ for (const match of app.matchAll(/setStatus\(ok \? '([\w.]+)' : '([\w.]+)'/g)) {
 }
 // badge.* 由 setWasmStatus 用模板拼出，不出现在字面量里。
 for (const key of ['badge.loading', 'badge.ready', 'badge.failed']) used.add(key);
+// langName 是语言按钮上显示的目标语言名，不走 t()，由 applyLang 直接取。
+for (const key of ['langName']) used.add(key);
 
 for (const key of [...used].sort()) {
   const missing = langs.filter(lang => typeof lookup(tables[lang], key) !== 'string');
