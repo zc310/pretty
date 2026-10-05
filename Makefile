@@ -1,5 +1,5 @@
 # Makefile
-.PHONY: build install test test-wasm-web clean cross dist run-example serve build-wasm package-wasm-web
+.PHONY: build install test test-wasm-web clean cross dist run-example serve build-wasm package-wasm-web print-wasm-opt-flags
 
 BINARY_NAME=pretty
 BUILD_DIR ?=/tmp/pretty-bin
@@ -10,8 +10,15 @@ BASE_FLAGS=-trimpath -ldflags "-s -w"
 
 # WebAssembly 构建。wasm_exec.js 每次从当前 GOROOT 拷贝，pretty.wasm 在 make
 # build-wasm 时生成，两者都在 .gitignore 里，不入库。
+# wasm-opt 的 feature flags 必须显式打开 Go 生成的 wasm 用到的特性：bulk memory
+# （memory.copy/memory.fill）、nontrapping-float-to-int（i64.trunc_sat_*）、
+# sign-ext 和 mutable-globals。缺一个 wasm-opt 就会在输入校验阶段报上百行
+# "[wasm-validator error ...] requires bulk memory" 然后退出非零。
+# 这些 flag 只影响 wasm-opt 是否接受输入，不会改变浏览器需要的功能集。
 WASM_OPT ?= wasm-opt
-WASM_OPT_FLAGS ?= -Oz
+WASM_OPT_FLAGS ?= -Oz \
+	--enable-bulk-memory --enable-bulk-memory-opt \
+	--enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals
 WASM_WEB_DIR=cmd/pretty-wasm/web
 WASM_BINARY=$(WASM_WEB_DIR)/pretty.wasm
 WASM_EXEC=$(WASM_WEB_DIR)/wasm_exec.js
@@ -44,19 +51,34 @@ serve: build-wasm
 	@echo "打开 http://localhost:8080/"
 	@python3 -m http.server 8080 --directory $(WASM_WEB_DIR)
 
+# 打印压缩选项，供 CI 校验 wasm-opt 版本认这些选项：Makefile 里定义一次，
+# 避免 CI 再抄一份，两边不一致就查不出来。
+print-wasm-opt-flags:
+	@echo '$(WASM_OPT_FLAGS)'
+
+# wasm-opt 是可选的，装了就压一遍体积，没装或者压不动都用未优化的产物继续，
+# 不能让可选工具拖垮构建。降级信息走 stdout 且不带"警告/错误"字样：这是正常
+# 路径，输出到 stderr 会被终端标红，看起来像构建失败。
 $(WASM_BINARY): FORCE
 	@mkdir -p $(dir $@)
-	@tmp="$@.tmp"; opt="$@.opt"; \
-	trap 'rm -f "$$tmp" "$$opt"' EXIT; \
-	CGO_ENABLED=0 GOOS=js GOARCH=wasm go build $(BASE_FLAGS) -o "$$tmp" ./cmd/pretty-wasm; \
+	@tmp="$@.tmp"; opt="$@.opt"; log="$@.log"; \
+	trap 'rm -f "$$tmp" "$$opt" "$$log"' EXIT; \
+	CGO_ENABLED=0 GOOS=js GOARCH=wasm go build $(BASE_FLAGS) -o "$$tmp" ./cmd/pretty-wasm || exit 1; \
+	optimized=0; \
 	if command -v $(WASM_OPT) >/dev/null 2>&1; then \
-		$(WASM_OPT) $(WASM_OPT_FLAGS) "$$tmp" -o "$$opt"; \
-		mv "$$opt" "$@"; \
-	else \
-		printf '%s\n' '警告: 未找到 wasm-opt，使用未优化的 WASM。' >&2; \
+		if $(WASM_OPT) $(WASM_OPT_FLAGS) "$$tmp" -o "$$opt" 2>"$$log" && [ -s "$$opt" ]; then \
+			mv "$$opt" "$@"; optimized=1; \
+		else \
+			printf '==> %s 压缩失败，改用未优化的产物：\n' "$(WASM_OPT)"; \
+			if [ -s "$$log" ]; then sed 's/^/    /' "$$log"; \
+			else printf '    （退出码为 0 但没有产出文件）\n'; fi; \
+		fi; \
+	fi; \
+	if [ $$optimized -eq 0 ]; then \
+		if [ ! -e "$$log" ]; then printf '==> 未找到 %s，跳过体积压缩（安装 binaryen 可启用）\n' "$(WASM_OPT)"; fi; \
 		mv "$$tmp" "$@"; \
-	fi
-	@printf '==> %s: ' "$@"; du -h "$@" | cut -f1
+	fi; \
+	printf '==> %s: ' "$@"; du -h "$@" | cut -f1
 
 $(WASM_EXEC): FORCE
 	@mkdir -p $(dir $@)
