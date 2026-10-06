@@ -9,6 +9,8 @@ const SAMPLE = `{"id":7,"name":"John","email":"john@example.com","active":true,
 const DOWNLOAD_NAME = 'formatted.json';
 const LANG_KEY = 'pretty-lang';
 const THEME_KEY = 'pretty-theme';
+// 超过这个字节数就不做语法高亮，只渲染纯文本。
+const HIGHLIGHT_MAX_BYTES = 256 * 1024;
 
 const I18N = window.PRETTY_I18N;
 
@@ -28,11 +30,17 @@ const el = {
   sortKeys: document.getElementById('sort-keys'),
   input: document.getElementById('input'),
   output: document.getElementById('output'),
+  outputBody: document.getElementById('output-body'),
+  outputGutter: document.getElementById('output-gutter'),
   inputMeta: document.getElementById('input-meta'),
   outputMeta: document.getElementById('output-meta'),
   splitter: document.getElementById('splitter'),
   statusbar: document.getElementById('status'),
 };
+
+// 输出面板不是 textarea，没有 value 可读，正文单独存一份作为唯一来源：
+// 复制、下载、回填、算体积都从这里取，不从 DOM 反查。
+const output = { text: '', isError: false };
 
 let wasmAPI = null;
 let lang = detectLang();
@@ -100,7 +108,11 @@ function applyLang() {
     node.title = t(node.dataset.i18nTitle);
   }
   for (const node of document.querySelectorAll('[data-i18n-placeholder]')) {
-    node.placeholder = t(node.dataset.i18nPlaceholder);
+    const text = t(node.dataset.i18nPlaceholder);
+    node.placeholder = text;
+    // 输出面板是 <pre>，没有 placeholder 属性，占位文案靠 CSS 的
+    // attr(data-placeholder) 取，所以两种形式都要写。
+    node.setAttribute('data-placeholder', text);
   }
 
   el.lang.textContent = I18N[lang === 'zh' ? 'en' : 'zh'].langName;
@@ -159,18 +171,16 @@ function updateMetas() {
   el.inputMeta.textContent = el.input.value === '' ? '' : formatBytes(byteLength(el.input.value));
   // 出错时右侧显示的是错误文本，不是 JSON，不标注体积。
   el.outputMeta.textContent =
-    el.output.classList.contains('error') || el.output.value === ''
-      ? ''
-      : formatBytes(byteLength(el.output.value));
+    output.isError || output.text === '' ? '' : formatBytes(byteLength(output.text));
 }
 
 function refreshButtons() {
   const ready = wasmAPI !== null;
   const hasInput = el.input.value.trim() !== '';
-  const hasOutput = !el.output.classList.contains('error') && el.output.value !== '';
+  const hasOutput = !output.isError && output.text !== '';
   el.format.disabled = !ready || !hasInput;
   el.ugly.disabled = !ready || !hasInput;
-  el.clear.disabled = !hasInput && el.output.value === '';
+  el.clear.disabled = !hasInput && output.text === '';
   el.copy.disabled = !hasOutput;
   el.download.disabled = !hasOutput;
   el.toInput.disabled = !hasOutput;
@@ -197,18 +207,14 @@ function run(ugly) {
   try {
     result = wasmAPI.format(el.input.value, currentOptions(ugly));
   } catch (error) {
-    el.output.classList.add('error');
-    el.output.value = errorText(error);
+    setOutput(errorText(error), true);
     setStatus('status.callFailed', { message: errorText(error) }, 'error');
-    updateMetas();
-    refreshButtons();
     return;
   }
   const elapsed = performance.now() - started;
 
   if (result && result.ok) {
-    el.output.classList.remove('error');
-    el.output.value = result.output;
+    setOutput(result.output, false);
     setStatus(
       'status.ok',
       {
@@ -220,29 +226,112 @@ function run(ugly) {
     );
   } else {
     const message = (result && result.error) || '';
-    el.output.classList.add('error');
-    el.output.value = message;
+    setOutput(message, true);
     setStatus('status.error', { message, ms: elapsed.toFixed(1) }, 'error');
+  }
+}
+
+// setOutput 是写入输出面板的唯一入口：顺带做高亮和行号，调用方不用各自记得。
+function setOutput(text, isError) {
+  output.text = text;
+  output.isError = isError;
+  el.outputBody.classList.toggle('error', isError);
+  el.outputBody.textContent = '';
+
+  if (isError || text === '') {
+    // 错误文本不是 JSON，不高亮也不编号。
+    el.outputBody.textContent = text;
+    el.outputGutter.textContent = '';
+  } else {
+    el.outputBody.appendChild(highlightJSON(text));
+    el.outputGutter.textContent = lineNumbers(text);
   }
   updateMetas();
   refreshButtons();
 }
 
+// highlightJSON 把已格式化的 JSON 渲染成带 span 的片段。输出一定是合法 JSON
+// （格式化成功才走到这里），所以词法扫描不需要容错；用 textContent 逐段写入，
+// 不拼 HTML 字符串，粘贴进来的内容不会被当成标记解析。
+function highlightJSON(text) {
+  const fragment = document.createDocumentFragment();
+  // 键是后面紧跟冒号的字符串；其余按字面量、数字、true/false/null、标点分类。
+  const pattern = /("(?:[^"\\]|\\.)*")(\s*:)|("(?:[^"\\]|\\.)*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(\btrue\b|\bfalse\b|\bnull\b)|([{}[\],:])/g;
+
+  // 超过这个体积就只渲染纯文本：每 KB 约 284 个 token，几百 KB 会有上万个
+  // span，浏览器布局会明显卡住。格式化本身不受影响。
+  if (byteLength(text) > HIGHLIGHT_MAX_BYTES) {
+    fragment.appendChild(document.createTextNode(text));
+    return fragment;
+  }
+
+  let last = 0;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > last) {
+      fragment.appendChild(document.createTextNode(text.slice(last, match.index)));
+    }
+    // match[1] 是键的引号部分，match[2] 是它后面的空白加冒号。
+    const [raw, key, keyTail, string, number, literal, punct] = match;
+    const span = document.createElement('span');
+    if (key !== undefined) {
+      span.className = 'tok-key';
+      // 冒号和键同色，视觉上更整齐。
+      span.textContent = key + (keyTail || '');
+    } else if (string !== undefined) {
+      span.className = 'tok-string';
+      span.textContent = string;
+    } else if (number !== undefined) {
+      span.className = 'tok-number';
+      span.textContent = number;
+    } else if (literal !== undefined) {
+      span.className = 'tok-literal';
+      span.textContent = literal;
+    } else if (punct !== undefined) {
+      span.className = 'tok-punct';
+      span.textContent = punct;
+    } else {
+      span.textContent = raw;
+    }
+    fragment.appendChild(span);
+    last = match.index + raw.length;
+  }
+  if (last < text.length) {
+    fragment.appendChild(document.createTextNode(text.slice(last)));
+  }
+  return fragment;
+}
+
+// lineNumbers 生成"1\n2\n3…"的纯文本，作为单个文本节点塞进行号列：
+// 每行一个 DOM 元素在几十万行时会拖垮布局，一个文本节点没有这个问题。
+function lineNumbers(text) {
+  const count = 1 + (text.match(/\n/g) || []).length;
+  let out = '';
+  for (let i = 1; i <= count; i += 1) out += `${i}\n`;
+  // 末尾多出的换行会让行号列比代码多出一行高度。
+  return out.slice(0, -1);
+}
+
 async function copyOutput() {
   try {
-    await navigator.clipboard.writeText(el.output.value);
+    await navigator.clipboard.writeText(output.text);
     setStatus('status.copied', null, 'ok');
   } catch (_) {
     // 非安全上下文（例如用 IP 直接访问）里 Clipboard API 不可用，退回选中复制。
-    el.output.focus();
-    el.output.select();
+    // 输出面板现在是 div，没有 select()，临时塞一个 textarea 交给 execCommand。
+    const scratch = document.createElement('textarea');
+    scratch.value = output.text;
+    scratch.setAttribute('readonly', '');
+    document.body.appendChild(scratch);
+    scratch.select();
     const ok = document.execCommand('copy');
+    document.body.removeChild(scratch);
     setStatus(ok ? 'status.copied' : 'status.copyFailed', null, ok ? 'ok' : 'error');
   }
 }
 
 function downloadOutput() {
-  const blob = new Blob([el.output.value], { type: 'application/json;charset=utf-8' });
+  const blob = new Blob([output.text], { type: 'application/json;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -254,30 +343,23 @@ function downloadOutput() {
 
 function clearAll() {
   el.input.value = '';
-  el.output.value = '';
-  el.output.classList.remove('error');
+  setOutput('', false);
   setStatus('status.cleared', null, '');
-  updateMetas();
-  refreshButtons();
   el.input.focus();
 }
 
 function loadSample() {
   el.input.value = SAMPLE;
-  el.output.value = '';
-  el.output.classList.remove('error');
-  updateMetas();
   if (wasmAPI) {
     run(false);
   } else {
+    setOutput('', false);
     setStatus('status.loading', null, 'error');
   }
 }
 
 function toInput() {
-  el.input.value = el.output.value;
-  el.output.value = '';
-  el.output.classList.remove('error');
+  el.input.value = output.text;
   run(false);
 }
 

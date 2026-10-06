@@ -27,6 +27,14 @@
     --control: #1b2030;
     --control-hover: #212739;
     --left-width: 50%;
+
+    /* 语法高亮。所有取值在两套主题下都达到 WCAG AA：正文类 >= 4.5:1，
+       标点类 >= 3:1（标点不承担信息，只做视觉分隔）。 */
+    --tok-key: #79b8ff;
+    --tok-string: #7ee787;
+    --tok-number: #f2a65a;
+    --tok-literal: #d2a8ff;
+    --tok-punct: #8b93a7;
   }
 
   /* 亮色主题。app.js 会在首次访问时按 prefers-color-scheme 决定是否加上这个属性，
@@ -50,6 +58,13 @@
     --ok-border: rgba(27, 122, 75, 0.4);
     --control: #ffffff;
     --control-hover: #eef1f6;
+
+    /* 亮色下的高亮色比暗色深，否则浅底上读不清。 */
+    --tok-key: #0550ae;
+    --tok-string: #0a7a4a;
+    --tok-number: #b35309;
+    --tok-literal: #7c3aed;
+    --tok-punct: #626b7d;
   }
 
   * { box-sizing: border-box; }
@@ -274,8 +289,62 @@
   }
 
   textarea::placeholder { color: var(--placeholder); }
-  textarea:read-only { color: var(--text-soft); }
   textarea.error { color: var(--error); }
+
+  /* 输出面板：gutter（行号列）+ 高亮代码。只读场景用 div 而不是 textarea，
+     这样才能放 span 做高亮；选中复制是浏览器原生行为，不受影响。
+     两层用同一套字体、行高、内边距，行号才能和代码逐行对齐；
+     white-space 一律 pre，不换行——换行会让"第 N 行"和实际视觉行对不上。 */
+  .code {
+    flex: 1 1 auto;
+    display: flex;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .code-gutter {
+    flex: 0 0 auto;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    padding: 12px 8px 12px 12px;
+    border-right: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--placeholder);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    text-align: right;
+    white-space: pre;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .code-body {
+    flex: 1 0 auto;
+    margin: 0;
+    padding: 12px;
+    color: var(--text-soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    tab-size: 2;
+    white-space: pre;
+  }
+
+  .code-body.error { color: var(--error); }
+
+  /* 空内容时用伪元素显示占位文案，和 textarea::placeholder 效果一致。 */
+  .code-body:empty::before {
+    content: attr(data-placeholder);
+    color: var(--placeholder);
+  }
+
+  .tok-key { color: var(--tok-key); }
+  .tok-string { color: var(--tok-string); }
+  .tok-number { color: var(--tok-number); }
+  .tok-literal { color: var(--tok-literal); }
+  .tok-punct { color: var(--tok-punct); }
 
   .splitter {
     cursor: col-resize;
@@ -380,7 +449,10 @@
       <span id="output-meta" class="meta"></span>
       <button id="btn-to-input" class="mini" data-i18n="btn.toInput" data-i18n-title="tip.toInput" disabled></button>
     </div>
-    <textarea id="output" readonly spellcheck="false" data-i18n-placeholder="placeholder.output"></textarea>
+    <div id="output" class="code">
+      <div id="output-gutter" class="code-gutter" aria-hidden="true"></div>
+      <pre id="output-body" class="code-body" data-i18n-placeholder="placeholder.output"></pre>
+    </div>
   </section>
 </main>
 
