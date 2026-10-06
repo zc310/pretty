@@ -302,35 +302,62 @@
     overflow: auto;
   }
 
+  .code-gutter,
+  .code-body {
+    padding: 12px 8px 12px 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    white-space: pre;
+  }
+
   .code-gutter {
     flex: 0 0 auto;
     position: sticky;
     left: 0;
     z-index: 1;
-    padding: 12px 8px 12px 12px;
     border-right: 1px solid var(--border);
     background: var(--panel);
     color: var(--placeholder);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-    font-size: 13px;
-    line-height: 1.55;
-    text-align: right;
-    white-space: pre;
     user-select: none;
     -webkit-user-select: none;
   }
 
   .code-body {
     flex: 1 0 auto;
-    margin: 0;
-    padding: 12px;
     color: var(--text-soft);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-    font-size: 13px;
-    line-height: 1.55;
     tab-size: 2;
-    white-space: pre;
   }
+
+  /* 每一行是一个元素。行号列和代码列按序号一一对应，折叠时两边一起隐藏，
+     行号才不会和代码错位。 */
+  .line-no {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.4em;
+  }
+
+  /* 行首的折叠箭头，和 VS Code 一样放在行号列里，不占代码的缩进。 */
+  .line-no.foldable { cursor: pointer; }
+
+  .line-no.foldable::before {
+    content: "\25B8";
+    color: var(--muted);
+  }
+
+  .line-no.foldable:hover::before { color: var(--text); }
+  .line-no.collapsed::before { content: "\25BE"; }
+
+  /* 折叠后在行尾补一个闭合括号和省略号，让人看得出这里还有内容。 */
+  .line.collapsed-tail::after {
+    content: "\2026}";
+    color: var(--muted);
+  }
+
+  .line.collapsed-tail.collapsed-square::after { content: "\2026]"; }
+
+  .code-body .line.hidden,
+  .code-gutter .line-no.hidden { display: none; }
 
   .code-body.error { color: var(--error); }
 
@@ -451,7 +478,7 @@
     </div>
     <div id="output" class="code">
       <div id="output-gutter" class="code-gutter" aria-hidden="true"></div>
-      <pre id="output-body" class="code-body" data-i18n-placeholder="placeholder.output"></pre>
+      <div id="output-body" class="code-body" data-i18n-placeholder="placeholder.output"></div>
     </div>
   </section>
 </main>

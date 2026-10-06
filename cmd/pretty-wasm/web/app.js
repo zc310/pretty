@@ -42,6 +42,11 @@ const el = {
 // 复制、下载、回填、算体积都从这里取，不从 DOM 反查。
 const output = { text: '', isError: false };
 
+// 渲染输出时记下的行元素和可折叠区间。lines[i] 的 code 和 number 分别是同��行的
+// 代码和行号；folds[i] 是一段可折叠的行号区间。重新渲染时整体重建。
+let lines = [];
+let folds = [];
+
 let wasmAPI = null;
 let lang = detectLang();
 let theme = detectTheme();
@@ -231,85 +236,170 @@ function run(ugly) {
   }
 }
 
-// setOutput 是写入输出面板的唯一入口：顺带做高亮和行号，调用方不用各自记得。
+// setOutput 是写入输出面板的唯一入口：顺带做高亮、行号和折叠，调用方不用各自记得。
 function setOutput(text, isError) {
   output.text = text;
   output.isError = isError;
   el.outputBody.classList.toggle('error', isError);
   el.outputBody.textContent = '';
+  el.outputGutter.textContent = '';
+  folds = [];
 
   if (isError || text === '') {
-    // 错误文本不是 JSON，不高亮也不编号。
+    // 错误文本不是 JSON，不高亮、不编号、不可折叠。
     el.outputBody.textContent = text;
-    el.outputGutter.textContent = '';
   } else {
-    el.outputBody.appendChild(highlightJSON(text));
-    el.outputGutter.textContent = lineNumbers(text);
+    renderJSON(text);
   }
   updateMetas();
   refreshButtons();
 }
 
-// highlightJSON 把已格式化的 JSON 渲染成带 span 的片段。输出一定是合法 JSON
-// （格式化成功才走到这里），所以词法扫描不需要容错；用 textContent 逐段写入，
-// 不拼 HTML 字符串，粘贴进来的内容不会被当成标记解析。
-function highlightJSON(text) {
-  const fragment = document.createDocumentFragment();
-  // 键是后面紧跟冒号的字符串；其余按字面量、数字、true/false/null、标点分类。
-  const pattern = /("(?:[^"\\]|\\.)*")(\s*:)|("(?:[^"\\]|\\.)*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(\btrue\b|\bfalse\b|\bnull\b)|([{}[\],:])/g;
-
-  // 超过这个体积就只渲染纯文本：每 KB 约 284 个 token，几百 KB 会有上万个
-  // span，浏览器布局会明显卡住。格式化本身不受影响。
+// renderJSON 按行渲染输出。折叠要按行隐藏内容，所以不能把所有 token 拍平成一个
+// 片段——每行必须是独立元素，行号列才有对应的东西可以一起隐藏。
+function renderJSON(text) {
+  // 超过这个体积只渲染纯文本：实测每 KB 约 284 个 token，几百 KB 会有上万个
+  // span 和上万个行元素，浏览器布局会明显卡住。格式化本身不受影响。
   if (byteLength(text) > HIGHLIGHT_MAX_BYTES) {
-    fragment.appendChild(document.createTextNode(text));
-    return fragment;
+    el.outputBody.textContent = text;
+    el.outputGutter.textContent = plainLineNumbers(text);
+    lines = [];
+    folds = [];
+    return;
   }
 
-  let last = 0;
-  let match;
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > last) {
-      fragment.appendChild(document.createTextNode(text.slice(last, match.index)));
+  // 末尾换行会造出一行空行，行号和代码都对不上。
+  const source = text.replace(/\n$/, '');
+  const bodyFragment = document.createDocumentFragment();
+  const gutterFragment = document.createDocumentFragment();
+  // 先写进局部变量，收尾再赋给模块级的 lines/folds：折叠的点击处理要读它们，
+  // 同名局部变量会把它遮住，表现成点了箭头没反应。
+  const newLines = [];
+  const newFolds = [];
+  const stack = [];
+
+  // newLine 开一行，行号列和代码列同时追加，两边始终等长。
+  function newLine() {
+    const number = document.createElement('div');
+    number.className = 'line-no';
+    number.textContent = String(newLines.length + 1);
+    const line = document.createElement('div');
+    line.className = 'line';
+    newLines.push({ code: line, number });
+    gutterFragment.appendChild(number);
+    bodyFragment.appendChild(line);
+    return line;
+  }
+
+  function appendText(chunk) {
+    let rest = chunk;
+    while (rest !== '') {
+      const breakAt = rest.indexOf('\n');
+      if (breakAt === -1) {
+        current.appendChild(document.createTextNode(rest));
+        return;
+      }
+      if (breakAt > 0) current.appendChild(document.createTextNode(rest.slice(0, breakAt)));
+      current = newLine();
+      rest = rest.slice(breakAt + 1);
     }
+  }
+
+  function appendToken(match) {
     // match[1] 是键的引号部分，match[2] 是它后面的空白加冒号。
     const [raw, key, keyTail, string, number, literal, punct] = match;
     const span = document.createElement('span');
+
     if (key !== undefined) {
       span.className = 'tok-key';
       // 冒号和键同色，视觉上更整齐。
       span.textContent = key + (keyTail || '');
+      current.appendChild(span);
     } else if (string !== undefined) {
       span.className = 'tok-string';
       span.textContent = string;
+      current.appendChild(span);
     } else if (number !== undefined) {
       span.className = 'tok-number';
       span.textContent = number;
+      current.appendChild(span);
     } else if (literal !== undefined) {
       span.className = 'tok-literal';
       span.textContent = literal;
+      current.appendChild(span);
     } else if (punct !== undefined) {
       span.className = 'tok-punct';
       span.textContent = punct;
+      current.appendChild(span);
+      if (punct === '{' || punct === '[') {
+        stack.push({ open: newLines.length - 1, closer: punct === '{' ? '}' : ']' });
+      } else if (punct === '}' || punct === ']') {
+        const frame = stack.pop();
+        // 只有真正跨了行才值得折叠：`{}` 折起来没有意义。
+        if (frame && newLines.length - 1 > frame.open) {
+          newLines[frame.open].number.classList.add('foldable');
+          newFolds.push({
+            start: frame.open,
+            end: newLines.length - 1,
+            // 折叠后要在行尾补上闭合括号，数组是 ] 不是 }。
+            closer: frame.closer,
+          });
+        }
+      }
     } else {
-      span.textContent = raw;
+      current.appendChild(document.createTextNode(raw));
     }
-    fragment.appendChild(span);
-    last = match.index + raw.length;
   }
-  if (last < text.length) {
-    fragment.appendChild(document.createTextNode(text.slice(last)));
+
+  // 输出一定是合法 JSON（格式化成功才走到这里），词法扫描不需要容错；
+  // 用 textContent 逐段写入，不拼 HTML 字符串，粘贴进来的内容不会被当成标记解析。
+  const pattern = /("(?:[^"\\]|\\.)*")(\s*:)|("(?:[^"\\]|\\.)*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(\btrue\b|\bfalse\b|\bnull\b)|([{}\[\],:])/g;
+  let current = newLine();
+  let last = 0;
+  let match;
+  while ((match = pattern.exec(source)) !== null) {
+    if (match.index > last) appendText(source.slice(last, match.index));
+    appendToken(match);
+    last = match.index + match[0].length;
   }
-  return fragment;
+  if (last < source.length) appendText(source.slice(last));
+
+  el.outputBody.appendChild(bodyFragment);
+  el.outputGutter.appendChild(gutterFragment);
+  lines = newLines;
+  folds = newFolds;
 }
 
-// lineNumbers 生成"1\n2\n3…"的纯文本，作为单个文本节点塞进行号列：
-// 每行一个 DOM 元素在几十万行时会拖垮布局，一个文本节点没有这个问题。
-function lineNumbers(text) {
-  const count = 1 + (text.match(/\n/g) || []).length;
+// plainLineNumbers 给超出高亮阈值的输出补行号：单个文本节点，几十万行也不会
+// 因为每行一个元素而拖垮布局。
+function plainLineNumbers(text) {
+  // 末尾换行在 white-space: pre 的块里不占一行（CSS 会去掉块末尾的换行），
+  // 行号却会多算一个，两列就对不齐了。renderJSON 里也用同样的规则去掉它。
+  const count = 1 + (text.replace(/\n$/, '').match(/\n/g) || []).length;
   let out = '';
   for (let i = 1; i <= count; i += 1) out += `${i}\n`;
   // 末尾多出的换行会让行号列比代码多出一行高度。
   return out.slice(0, -1);
+}
+
+// toggleFold 折叠或展开一个区间。区间两端已经换行隐藏，所以代码列少掉的行数和
+// 行号列一致；对齐不会破。
+function toggleFold(index) {
+  const fold = folds[index];
+  if (!fold) return;
+  const collapsed = !isCollapsed(fold);
+  for (let line = fold.start + 1; line <= fold.end; line += 1) {
+    lines[line].code.classList.toggle('hidden', collapsed);
+    lines[line].number.classList.toggle('hidden', collapsed);
+  }
+  const opener = lines[fold.start];
+  opener.number.classList.toggle('collapsed', collapsed);
+  opener.code.classList.toggle('collapsed-tail', collapsed);
+  opener.code.classList.toggle('collapsed-square', collapsed && fold.closer === ']');
+}
+
+function isCollapsed(fold) {
+  return fold.end > fold.start && lines[fold.start + 1].code.classList.contains('hidden');
 }
 
 async function copyOutput() {
@@ -361,6 +451,18 @@ function loadSample() {
 function toInput() {
   el.input.value = output.text;
   run(false);
+}
+
+// 行号列上的折叠箭头。事件委托给整列，避免每个箭头挂一个监听器。
+function installFolding() {
+  el.outputGutter.addEventListener('click', event => {
+    const target = event.target.closest('.line-no.foldable');
+    if (!target) return;
+    const line = lines.findIndex(entry => entry.number === target);
+    if (line === -1) return;
+    const fold = folds.findIndex(entry => entry.start === line);
+    if (fold !== -1) toggleFold(fold);
+  });
 }
 
 function installSplitter() {
@@ -432,6 +534,7 @@ function main() {
     });
   }
   installSplitter();
+  installFolding();
   applyLang();
   refreshButtons();
 
