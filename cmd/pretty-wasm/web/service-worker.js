@@ -6,7 +6,7 @@
  *
  * 预缓存列表和实际文件名必须一致，由 make test-wasm-web 检查。
  */
-const CACHE_NAME = 'pretty-shell_placeholder';
+const CACHE_NAME = 'pretty-shell_f84c002c77781136';
 
 const PRECACHE = [
   './',
