@@ -1,5 +1,5 @@
 # Makefile
-.PHONY: build install test test-wasm-web clean cross dist run-example serve build-wasm package-wasm-web print-wasm-opt-flags
+.PHONY: build install test test-wasm-web clean cross dist run-example serve build-wasm package-wasm-web print-wasm-opt-flags wasm-icons
 
 BINARY_NAME=pretty
 BUILD_DIR ?=/tmp/pretty-bin
@@ -22,6 +22,12 @@ WASM_OPT_FLAGS ?= -Oz \
 WASM_WEB_DIR=cmd/pretty-wasm/web
 WASM_BINARY=$(WASM_WEB_DIR)/pretty.wasm
 WASM_EXEC=$(WASM_WEB_DIR)/wasm_exec.js
+WASM_SERVICE_WORKER=$(WASM_WEB_DIR)/service-worker.js
+# Service Worker 的 CACHE_NAME 按这些文件的内容算哈希。少列一个就可能算出
+# 和上一版相同的名字，用户会继续用旧缓存；多列无害。
+WASM_SHELL_FILES=index.html app.js i18n.js manifest.webmanifest favicon.svg \
+	icon-192.png icon-512.png icon-maskable-512.png apple-touch-icon.png
+WASM_SHELL_PATHS=$(addprefix $(WASM_WEB_DIR)/,$(WASM_SHELL_FILES)) $(WASM_EXEC) $(WASM_BINARY)
 # abspath 必须在 cd 进 web 目录前算好：BUILD_DIR 可能是绝对路径，直接拼 CURDIR
 # 会得到 /仓库根//tmp/... 这种非法的输出路径。
 WASM_PACKAGE=$(abspath $(BUILD_DIR)/pretty-wasm-web.zip)
@@ -42,10 +48,12 @@ test-wasm-web:
 
 clean:
 	rm -rf $(BUILD_DIR) $(WASM_BINARY) $(WASM_EXEC)
+	# service-worker.js 是入库文件，clean 只把 CACHE_NAME 复位成占位值。
+	sed -i "s/^const CACHE_NAME = '.*';$$/const CACHE_NAME = 'pretty-shell_placeholder';/" $(WASM_SERVICE_WORKER)
 
 # 浏览器示例：make build-wasm 之后用 make serve 打开页面。
 # 浏览器不能用 file:// 加载 WASM，必须通过 HTTP 访问。
-build-wasm: $(WASM_BINARY) $(WASM_EXEC)
+build-wasm: $(WASM_BINARY) $(WASM_EXEC) $(WASM_SERVICE_WORKER)
 
 serve: build-wasm
 	@echo "打开 http://localhost:8080/"
@@ -84,11 +92,24 @@ $(WASM_EXEC): FORCE
 	@mkdir -p $(dir $@)
 	cp "$$(CGO_ENABLED=0 GOOS=js GOARCH=wasm go env GOROOT)/lib/wasm/wasm_exec.js" "$@"
 
-# test/ 是本地检查脚本，页面上没有入口，和 Pages 部署一样剔掉。
+# 重算 Service Worker 里的 CACHE_NAME。页面入口、页面脚本、WASM 和图标都用不带
+# 查询参数的固定路径，缓存换代完全靠这个名字：任一资源内容变化，名字就变，
+# 新 Service Worker 安装时删除旧缓存并重新缓存全部资源。普通刷新刷不动它。
+$(WASM_SERVICE_WORKER): $(WASM_SHELL_PATHS) FORCE
+	@hash=$$(cat $(WASM_SHELL_PATHS) | sha256sum | cut -c1-16); \
+	sed -i "s/^const CACHE_NAME = '.*';$$/const CACHE_NAME = 'pretty-shell_$$hash';/" "$@"; \
+	printf '==> Service Worker CACHE_NAME: pretty-shell_%s\n' "$$hash"
+
+# 图标由 web/tools/make-icons.py 生成，改了图形重新跑一次，再执行 make build-wasm
+# 重算 CACHE_NAME，否则 Service Worker 的字节没变，浏览器会继续用旧图标缓存。
+wasm-icons:
+	@python3 $(WASM_WEB_DIR)/tools/make-icons.py
+
+# test/ 和 tools/ 是本地脚本，页面上没有入口，和 Pages 部署一样剔掉。
 package-wasm-web: build-wasm
 	@mkdir -p $(BUILD_DIR)
 	@rm -f $(WASM_PACKAGE)
-	@cd $(WASM_WEB_DIR) && zip -q -r "$(WASM_PACKAGE)" . -x 'test/*'
+	@cd $(WASM_WEB_DIR) && zip -q -r "$(WASM_PACKAGE)" . -x 'test/*' -x 'tools/*'
 	@echo "Web package created in $(WASM_PACKAGE)"
 
 FORCE:

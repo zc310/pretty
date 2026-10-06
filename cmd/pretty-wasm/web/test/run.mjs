@@ -125,6 +125,84 @@ for (const id of ids) {
 // app.js 依赖这些全局对象，index.html 必须先引入 wasm_exec.js。
 check('wasm_exec.js loads before app.js', /wasm_exec\.js[\s\S]*i18n\.js[\s\S]*app\.js/.test(html));
 
+// —— 装成 app 和离线所需的文件 ——
+const readIfPresent = name => {
+  const file = path.join(webDir, name);
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+};
+const exists = name => fs.existsSync(path.join(webDir, name));
+
+const manifestSource = readIfPresent('manifest.webmanifest');
+if (!manifestSource) {
+  console.log('skip PWA checks: manifest.webmanifest not found');
+} else {
+  let manifest = null;
+  try {
+    manifest = JSON.parse(manifestSource);
+    check('manifest.webmanifest is valid JSON', true);
+  } catch (error) {
+    check('manifest.webmanifest is valid JSON', false, error.message);
+  }
+  if (manifest) {
+    // 浏览器判定"可安装"要 manifest 有 name/图标/start_url/display 四样，加上一条
+    // 带 fetch 的 Service Worker。少一样就不会出现安装入口。
+    check('manifest has name', typeof manifest.name === 'string' && manifest.name !== '');
+    check('manifest has display', manifest.display === 'standalone', `got ${manifest.display}`);
+    check('manifest has start_url', typeof manifest.start_url === 'string' && manifest.start_url !== '');
+    const sizes = (manifest.icons || []).map(icon => icon.sizes);
+    check('manifest has a 192px icon', sizes.includes('192x192'), `got ${sizes.join(', ')}`);
+    check('manifest has a 512px icon', sizes.includes('512x512'), `got ${sizes.join(', ')}`);
+    check(
+      'manifest has a maskable icon',
+      (manifest.icons || []).some(icon => (icon.purpose || '').split(/\s+/).includes('maskable')),
+    );
+    for (const icon of manifest.icons || []) {
+      check(`manifest icon ${icon.src} exists`, exists(icon.src));
+    }
+    check('index.html links the manifest', /<link[^>]+rel="manifest"[^>]+href="manifest\.webmanifest"/.test(html));
+    check('index.html links the apple-touch-icon', /rel="apple-touch-icon"/.test(html));
+  }
+}
+
+const swSource = readIfPresent('service-worker.js');
+if (!swSource) {
+  console.log('skip service worker checks: service-worker.js not found');
+} else {
+  check('app.js registers the service worker', /serviceWorker\.register\(\s*'service-worker\.js'\)/.test(app));
+  check('service worker has an install handler', /addEventListener\(\s*'install'/.test(swSource));
+  check('service worker has an activate handler', /addEventListener\(\s*'activate'/.test(swSource));
+  check('service worker has a fetch handler', /addEventListener\(\s*'fetch'/.test(swSource));
+
+  // 预缓存列表必须覆盖装成 app 后真正会用到的文件，漏一个断网就少一块。
+  const listMatch = swSource.match(/const PRECACHE = \[([\s\S]*?)\];/);
+  check('service worker declares PRECACHE', listMatch !== null);
+  if (listMatch) {
+    const precache = [...listMatch[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
+    const expected = [
+      './', 'index.html', 'app.js', 'i18n.js', 'wasm_exec.js', 'pretty.wasm',
+      'manifest.webmanifest', 'favicon.svg', 'icon-192.png', 'icon-512.png',
+      'icon-maskable-512.png', 'apple-touch-icon.png',
+    ].map(name => (name === './' ? name : `./${name}`));
+    for (const name of expected) {
+      check(`precache lists ${name}`, precache.includes(name), `got ${precache.join(', ')}`);
+    }
+    // 缓存名按内容重算。入库文件里是占位值，make build-wasm 才会改写它：
+    //   - 仍是占位值、且构建产物也不在，说明本地还没构建，属正常；
+    //   - 仍是占位值、但产物已经在了，说明构建跑了却没重算，部署出去用户会被旧缓存锁死。
+    const cacheName = (swSource.match(/const CACHE_NAME = '([^']*)'/) || [])[1] || '';
+    const built = exists('pretty.wasm');
+    if (built) {
+      check(
+        'CACHE_NAME was recomputed by the build',
+        /^pretty-shell_[0-9a-f]{16}$/.test(cacheName),
+        `${cacheName}（构建产物已生成但缓存名没重算，部署后用户拿不到新版本）`,
+      );
+    } else {
+      console.log(`skip CACHE_NAME check: ${cacheName}（还没跑 make build-wasm）`);
+    }
+  }
+}
+
 if (problems.length > 0) {
   console.error(`\n${problems.length} problem(s):\n- ${problems.join('\n- ')}`);
   process.exit(1);

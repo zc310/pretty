@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="在浏览器里格式化和压缩 JSON，Go + WebAssembly，全部处理都在本地完成">
+<meta name="theme-color" content="#0f1117">
+<meta name="color-scheme" content="dark light">
+<!-- 装成 app：浏览器要求 manifest、带 fetch 的 Service Worker 和 192/512 图标三样齐备。 -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>Pretty JSON · WebAssembly</title>
 <style>
   /* 所有颜色都走变量，暗色是 :root 的默认值，亮色在下面按 [data-theme] 覆盖。

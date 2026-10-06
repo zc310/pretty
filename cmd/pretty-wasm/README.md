@@ -62,13 +62,32 @@ const result = pretty.format('{"b":1,"a":{"c":2}}');
 
 选项类型不对时 `ok` 为 `false`，`error` 说明是哪个字段。
 
+## 装成 app 和离线使用
+
+页面是一个 PWA：满足 manifest、带 `fetch` 的 Service Worker、192 和 512 图标这三个条件，浏览器地址栏会出现安装入口，装上之后有独立窗口和图标，断网也能用。
+
+Service Worker 把页面入口、脚本、`wasm_exec.js`、`pretty.wasm`、manifest 和图标全部预缓存。缓存名字 `CACHE_NAME` 由 `make build-wasm` 按这些文件的字节内容算哈希重算：任一资源变了名字就变，新 Service Worker 安装时删掉旧缓存重新缓存。**光刷新普通 HTTP 缓存刷不掉它**，所以改了资源一定要重新构建。
+
+部署要求：
+
+- 必须是 HTTPS 或 `http://localhost`，`file://` 下 Service Worker 用不了。
+- `.webmanifest` 建议 `application/manifest+json`，`.wasm` 建议 `application/wasm`；MIME 不对时页面有回退（`WebAssembly.instantiate`），但安装入口可能不出现。
+- 不要给 `service-worker.js` 加缓存头，否则浏览器拿不到新版本，用户会被旧缓存锁死。
+
+图标由 `web/tools/make-icons.py` 生成（只用标准库，不依赖 PIL 或 ImageMagick）。改了图形后重新执行：
+
+```bash
+make wasm-icons     # 重新生成图标
+make build-wasm     # 图标变了要重算 CACHE_NAME，否则浏览器继续用旧图标缓存
+```
+
 ## 注意事项
 
 - 错误文本来自 Go 库（英文），不随页面语言切换。
 - `ugly: true` 走库里的 `MarshalTo` 快路径，不做键排序，`sortKeys` 在压缩模式下无效。
 - 示例页在主线程调用 WASM。几百 KB 的 JSON 几乎没有感觉，几 MB 的输入会短暂占用主线程；需要更稳可以自己把 `wasm_exec.js`、`pretty.wasm` 和这段胶水代码搬进 Web Worker，用 `postMessage` 传字符串。
 - js/wasm 构建不含 `goccy/go-json`：它只接受 JSON 文本（`string`、`[]byte`）或 `*fastjson.Value`，把 Go 值序列化的兜底分支在 wasm 下返回错误，这样二进制小很多。
-- `pretty.wasm` 和 `wasm_exec.js` 是构建产物，已在 `.gitignore` 里，不要提交。
+- `pretty.wasm` 和 `wasm_exec.js` 是构建产物，已在 `.gitignore` 里，不要提交。`service-worker.js` 是入库文件，但里面的 `CACHE_NAME` 是构建时重算的占位值，`make clean` 会把它复位。
 
 ## 构建与打包
 

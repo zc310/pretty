@@ -104,14 +104,27 @@ jobs:
             echo "::error::pretty.wasm 未压缩，检查 wasm-opt 是否生效"
             exit 1
           fi
+          # CACHE_NAME 还是占位值就说明 make build-wasm 那步没跑到重算，用户会一直
+          # 用着旧缓存，页面更新永远推不下去。
+          cache_name=$(sed -n "s/^const CACHE_NAME = '\(.*\)';$/\1/p" cmd/pretty-wasm/web/service-worker.js)
+          echo "CACHE_NAME: $cache_name"
+          case "$cache_name" in
+            pretty-shell_????????????????) ;;
+            *) echo "::error::CACHE_NAME 未重算（当前 $cache_name），部署后用户拿不到新版本"; exit 1 ;;
+          esac
 
       # upload-pages-artifact 不支持排除项，先把要发布的文件挑到 _site。
-      # 剔掉 test/：那是本地跑 make test-wasm-web 用的检查脚本，页面上没有入口。
+      # 剔掉 test/ 和 tools/：本地跑检查和生成图标的脚本，页面上没有入口。
+      # manifest.webmanifest、service-worker.js 和图标都要留下：少了它们页面就装
+      # 不成 app，也不离线。
       - name: Stage site
         run: |
           mkdir -p _site
           cp -a cmd/pretty-wasm/web/. _site/
-          rm -rf _site/test
+          rm -rf _site/test _site/tools
+          for f in manifest.webmanifest service-worker.js icon-192.png icon-512.png; do
+            test -s "_site/$f" || { echo "::error::_site/$f 缺失，装 app 或离线会失效"; exit 1; }
+          done
           echo "发布内容："
           find _site -type f | sort
 

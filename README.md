@@ -132,7 +132,7 @@ pretty.format('{"b":1,"a":{"c":2}}', { indent: '  ', sortKeys: true });
 
 The `web` directory is a ready-to-deploy page: paste JSON on the left, click a button, read the formatted result on the right. Its UI is available in English and Chinese. `make test-wasm-web` checks the translation tables and DOM wiring. See [`cmd/pretty-wasm/README.md`](cmd/pretty-wasm/README.md) for the JS API and build details.
 
-Online demo: <https://zc310.github.io/pretty/> — pushed to `main` is built and deployed automatically by [`.github/workflows/pages.yml`](.github/workflows/pages.yml).
+Online demo: <https://zc310.github.io/pretty/> — pushed to `main` is built and deployed automatically by [`.github/workflows/pages.yml`](.github/workflows/pages.yml). The page is installable as an app and keeps working offline: a web app manifest plus a service worker precache the page, `wasm_exec.js` and `pretty.wasm`, so nothing is fetched after the first visit.
 
 Note that the js/wasm build does not bundle `goccy/go-json`, so it accepts JSON text (`string`, `[]byte`) or `*fastjson.Value` only; serializing arbitrary Go values returns an error there.
 

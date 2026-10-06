@@ -487,6 +487,16 @@ function installSplitter() {
   el.splitter.addEventListener('pointercancel', stop);
 }
 
+// registerServiceWorker 让页面装成 app 后离线可用。注册失败不影响在线使用
+// （file:// 下没有 navigator.serviceWorker，装到子目录时也可能被服务器挡掉），
+// 所以只记日志，不往状态栏里报错。
+function registerServiceWorker() {
+  if (!navigator.serviceWorker) return;
+  navigator.serviceWorker.register('service-worker.js').catch(error => {
+    console.info('[pretty-wasm] Service Worker 未注册，离线不可用:', error);
+  });
+}
+
 async function loadWasm() {
   if (typeof Go !== 'function') throw new Error('wasm_exec.js is missing');
 
@@ -535,6 +545,7 @@ function main() {
   }
   installSplitter();
   installFolding();
+  registerServiceWorker();
   applyLang();
   refreshButtons();
 
